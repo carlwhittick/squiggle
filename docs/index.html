@@ -395,10 +395,10 @@ npm install @carlwhittick/squiggle
 
 <span class="tok-comment">// with options</span>
 <span class="tok-kw">const</span> instance = <span class="tok-fn">squiggleUnderline</span>(<span class="tok-str">'a'</span>, {
-  <span class="tok-prop">amplitudeEm</span>:      <span class="tok-num">0.2</span>,   <span class="tok-comment">// wave half-height as em multiplier</span>
-  <span class="tok-prop">frequency</span>:        <span class="tok-num">4</span>,     <span class="tok-comment">// Hz</span>
-  <span class="tok-prop">propagationSpeed</span>: <span class="tok-num">300</span>,   <span class="tok-comment">// px / s</span>
-  <span class="tok-prop">timeDamping</span>:      <span class="tok-num">2.5</span>,   <span class="tok-comment">// amplitude decay over time</span>
+  <span class="tok-prop">amplitudeEm</span>:      <span class="tok-num" id="code-amplitude">0.2</span>,   <span class="tok-comment">// wave half-height as em multiplier</span>
+  <span class="tok-prop">frequency</span>:        <span class="tok-num" id="code-frequency">4</span>,     <span class="tok-comment">// Hz</span>
+  <span class="tok-prop">propagationSpeed</span>: <span class="tok-num" id="code-speed">300</span>,   <span class="tok-comment">// px / s</span>
+  <span class="tok-prop">timeDamping</span>:      <span class="tok-num" id="code-time">2.5</span>,   <span class="tok-comment">// amplitude decay over time</span>
 });
 
 <span class="tok-comment">// clean up (SPA route change, etc.)</span>
@@ -466,21 +466,23 @@ instance.<span class="tok-fn">destroy</span>();</pre>
 
   // Wire up sliders
   const sliders = [
-    { id: 'r-amplitude', label: 'v-amplitude', key: 'amplitudeEm',      fmt: v => v.toFixed(2) },
-    { id: 'r-frequency', label: 'v-frequency', key: 'frequency',         fmt: v => v },
-    { id: 'r-speed',     label: 'v-speed',     key: 'propagationSpeed',  fmt: v => v },
-    { id: 'r-spatial',   label: 'v-spatial',   key: 'spatialDamping',    fmt: v => v.toFixed(3) },
-    { id: 'r-time',      label: 'v-time',      key: 'timeDamping',       fmt: v => v.toFixed(1) },
-    { id: 'r-wl',        label: 'v-wl',        key: 'wavelengthBase',    fmt: v => v },
+    { id: 'r-amplitude', label: 'v-amplitude', code: 'code-amplitude', key: 'amplitudeEm',      fmt: v => v.toFixed(2) },
+    { id: 'r-frequency', label: 'v-frequency', code: 'code-frequency', key: 'frequency',         fmt: v => v },
+    { id: 'r-speed',     label: 'v-speed',     code: 'code-speed',     key: 'propagationSpeed',  fmt: v => v },
+    { id: 'r-spatial',   label: 'v-spatial',   code: null,             key: 'spatialDamping',    fmt: v => v.toFixed(3) },
+    { id: 'r-time',      label: 'v-time',      code: 'code-time',      key: 'timeDamping',       fmt: v => v.toFixed(1) },
+    { id: 'r-wl',        label: 'v-wl',        code: null,             key: 'wavelengthBase',    fmt: v => v },
   ];
 
-  sliders.forEach(({ id, label, key, fmt }) => {
+  sliders.forEach(({ id, label, code, key, fmt }) => {
     const input = document.getElementById(id);
     const display = document.getElementById(label);
+    const codeEl = code ? document.getElementById(code) : null;
     input.addEventListener('input', () => {
       const val = parseFloat(input.value);
       opts[key] = val;
       display.textContent = fmt(val);
+      if (codeEl) codeEl.textContent = fmt(val);
       attach();
     });
   });
