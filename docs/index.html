@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>squiggle — animated canvas underlines</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f11;
+      --surface: #18181b;
+      --border: #27272a;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #a78bfa;
+      --accent2: #f472b6;
+      --accent3: #34d399;
+      --code-bg: #1c1c20;
+      --radius: 10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    /* ── layout ─────────────────────────────────────────────── */
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── header ─────────────────────────────────────────────── */
+    header {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      border-radius: 99px;
+      padding: 3px 12px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 800;
+      letter-spacing: -.03em;
+      line-height: 1.1;
+      margin-bottom: 18px;
+    }
+
+    .tagline {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 480px;
+      margin: 0 auto 36px;
+    }
+
+    .header-links {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .8; }
+    .btn-primary {
+      background: var(--accent);
+      color: #0f0f11;
+    }
+    .btn-ghost {
+      border-color: var(--border);
+      color: var(--text);
+      background: var(--surface);
+    }
+
+    /* ── sections ───────────────────────────────────────────── */
+    section {
+      margin-bottom: 72px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      margin-bottom: 20px;
+    }
+
+    /* ── demo card ──────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .card-body {
+      padding: 36px 40px;
+    }
+
+    /* ── live demo text ─────────────────────────────────────── */
+    .demo-prose {
+      font-size: 1.05rem;
+      line-height: 1.9;
+    }
+
+    .demo-prose p {
+      margin-bottom: 1em;
+    }
+
+    .demo-prose p:last-child { margin-bottom: 0; }
+
+    .sq { color: var(--text); text-decoration: underline; cursor: pointer; }
+    .sq-purple { color: var(--accent); text-decoration: underline; }
+    .sq-pink   { color: var(--accent2); text-decoration: underline; }
+    .sq-green  { color: var(--accent3); text-decoration: underline; }
+
+    /* big headline demo */
+    .demo-headline {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 800;
+      letter-spacing: -.03em;
+      line-height: 1.25;
+    }
+
+    .demo-headline .sq { font-size: inherit; }
+
+    /* small text demo */
+    .demo-small {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    /* ── separator ──────────────────────────────────────────── */
+    .card-sep {
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── controls ───────────────────────────────────────────── */
+    .controls {
+      padding: 24px 40px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 20px 32px;
+    }
+
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .control-group label span {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .control-group input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 99px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .control-group input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    /* ── code block ─────────────────────────────────────────── */
+    .code-block {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      overflow-x: auto;
+    }
+
+    pre {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      font-size: 13.5px;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    .tok-comment { color: #52525b; }
+    .tok-kw      { color: #c084fc; }
+    .tok-fn      { color: #67e8f9; }
+    .tok-str     { color: #86efac; }
+    .tok-num     { color: #fb923c; }
+    .tok-prop    { color: var(--accent2); }
+
+    /* ── options table ──────────────────────────────────────── */
+    .opts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+
+    .opts-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .opts-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      vertical-align: top;
+    }
+
+    .opts-table tr:last-child td { border-bottom: none; }
+
+    .opts-table code {
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      color: var(--accent2);
+      font-size: 12.5px;
+    }
+
+    .opts-table .val {
+      color: var(--accent);
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      font-size: 12.5px;
+    }
+
+    /* ── footer ─────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header>
+    <div class="badge">npm install @carlwhittick/squiggle</div>
+    <h1>squiggle</h1>
+    <p class="tagline">Canvas-drawn animated underlines that ripple outward from hover and click, with skip-ink around glyphs.</p>
+    <div class="header-links">
+      <a class="btn btn-primary" href="https://github.com/carlwhittick/squiggle">GitHub</a>
+      <a class="btn btn-ghost" href="https://www.npmjs.com/package/@carlwhittick/squiggle">npm</a>
+    </div>
+  </header>
+
+  <!-- ── Live demo ────────────────────────────────────────────── -->
+  <section>
+    <p class="section-label">Live demo</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="demo-prose">
+          <p class="demo-headline">
+            Hover or click <a class="sq sq-purple" href="#">these rippling words</a> to see
+            the wave propagate.
+          </p>
+        </div>
+      </div>
+
+      <hr class="card-sep" />
+
+      <div class="card-body">
+        <div class="demo-prose">
+          <p>
+            Squiggle replaces native <code style="color:var(--accent2);font-family:monospace">text-decoration</code> with an absolutely-positioned
+            canvas that draws a <a class="sq sq-purple" href="#">damped travelling wave</a> along the baseline.
+            It reads the element's computed color, thickness, and underline offset —
+            so it respects <a class="sq sq-pink" href="#">CSS decoration properties</a> out of the box.
+          </p>
+          <p>
+            Each mouseenter or click plants a <a class="sq sq-green" href="#">ripple origin</a>.
+            Multiple overlapping ripples <a class="sq sq-purple" href="#">superpose correctly</a>,
+            and a <a class="sq sq-pink" href="#">ResizeObserver</a> keeps the canvas in sync
+            as layout changes.
+          </p>
+        </div>
+      </div>
+
+      <hr class="card-sep" />
+
+      <div class="card-body demo-small">
+        <p>
+          Works at any size &mdash;
+          <a class="sq" href="#" style="font-size:.82rem">small text links</a> get
+          the same skip-ink treatment, gapping around descenders and ascenders so
+          the line never punches through a <a class="sq" href="#" style="font-size:.82rem">g, j, p, q, y</a>.
+        </p>
+      </div>
+
+      <hr class="card-sep" />
+
+      <!-- Controls -->
+      <div class="controls" id="controls">
+        <div class="control-group">
+          <label>amplitude <span id="v-amplitude">0.2</span></label>
+          <input type="range" id="r-amplitude" min="0.05" max="0.6" step="0.01" value="0.2" />
+        </div>
+        <div class="control-group">
+          <label>frequency <span id="v-frequency">4</span></label>
+          <input type="range" id="r-frequency" min="1" max="12" step="0.5" value="4" />
+        </div>
+        <div class="control-group">
+          <label>propagationSpeed <span id="v-speed">300</span></label>
+          <input type="range" id="r-speed" min="50" max="800" step="10" value="300" />
+        </div>
+        <div class="control-group">
+          <label>spatialDamping <span id="v-spatial">0.012</span></label>
+          <input type="range" id="r-spatial" min="0.001" max="0.06" step="0.001" value="0.012" />
+        </div>
+        <div class="control-group">
+          <label>timeDamping <span id="v-time">2.5</span></label>
+          <input type="range" id="r-time" min="0.2" max="8" step="0.1" value="2.5" />
+        </div>
+        <div class="control-group">
+          <label>wavelengthBase <span id="v-wl">16</span></label>
+          <input type="range" id="r-wl" min="4" max="60" step="1" value="16" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Install / Usage ──────────────────────────────────────── -->
+  <section>
+    <p class="section-label">Usage</p>
+    <div class="code-block">
+<pre><span class="tok-comment">// install</span>
+npm install @carlwhittick/squiggle
+
+<span class="tok-comment">// import</span>
+<span class="tok-kw">import</span> { <span class="tok-fn">squiggleUnderline</span> } <span class="tok-kw">from</span> <span class="tok-str">'@carlwhittick/squiggle'</span>;
+
+<span class="tok-comment">// attach to any CSS selector</span>
+<span class="tok-kw">const</span> instance = <span class="tok-fn">squiggleUnderline</span>(<span class="tok-str">'a, .link'</span>);
+
+<span class="tok-comment">// with options</span>
+<span class="tok-kw">const</span> instance = <span class="tok-fn">squiggleUnderline</span>(<span class="tok-str">'a'</span>, {
+  <span class="tok-prop">amplitudeEm</span>:      <span class="tok-num">0.2</span>,   <span class="tok-comment">// wave half-height as em multiplier</span>
+  <span class="tok-prop">frequency</span>:        <span class="tok-num">4</span>,     <span class="tok-comment">// Hz</span>
+  <span class="tok-prop">propagationSpeed</span>: <span class="tok-num">300</span>,   <span class="tok-comment">// px / s</span>
+  <span class="tok-prop">timeDamping</span>:      <span class="tok-num">2.5</span>,   <span class="tok-comment">// amplitude decay over time</span>
+});
+
+<span class="tok-comment">// clean up (SPA route change, etc.)</span>
+instance.<span class="tok-fn">destroy</span>();</pre>
+    </div>
+  </section>
+
+  <!-- ── Options table ────────────────────────────────────────── -->
+  <section>
+    <p class="section-label">Options</p>
+    <div class="card">
+      <table class="opts-table">
+        <thead>
+          <tr>
+            <th>Option</th>
+            <th>Default</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>amplitudeEm</code></td>     <td class="val">0.2</td>    <td>Wave half-amplitude as em multiplier</td></tr>
+          <tr><td><code>wavelengthBase</code></td>  <td class="val">16</td>    <td>Base wavelength in px</td></tr>
+          <tr><td><code>wavelengthEm</code></td>    <td class="val">0.5</td>    <td>Wavelength em contribution</td></tr>
+          <tr><td><code>frequency</code></td>       <td class="val">4</td>     <td>Oscillation frequency (Hz)</td></tr>
+          <tr><td><code>propagationSpeed</code></td><td class="val">300</td>   <td>Ripple travel speed (px/s)</td></tr>
+          <tr><td><code>spatialDamping</code></td>  <td class="val">0.012</td> <td>Amplitude decay with distance</td></tr>
+          <tr><td><code>timeDamping</code></td>     <td class="val">2.5</td>   <td>Amplitude decay over time</td></tr>
+          <tr><td><code>thicknessEm</code></td>     <td class="val">0.075</td> <td>Stroke thickness as em multiplier</td></tr>
+          <tr><td><code>offsetYEm</code></td>       <td class="val">-0.05</td> <td>Vertical offset from baseline</td></tr>
+          <tr><td><code>skipInkGapEm</code></td>    <td class="val">0.1</td>   <td>Gap around glyphs (skip-ink)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="container">
+    MIT license &mdash; <a href="https://github.com/carlwhittick/squiggle">github.com/carlwhittick/squiggle</a>
+  </div>
+</footer>
+
+<!-- Load from unpkg (UMD build, global = Squiggle) -->
+<script src="https://unpkg.com/@carlwhittick/squiggle/dist/squiggle.umd.cjs"></script>
+<script>
+  // Options kept in one object; re-applied on every slider change
+  const opts = {
+    amplitudeEm:      0.2,
+    frequency:        4,
+    propagationSpeed: 300,
+    spatialDamping:   0.012,
+    timeDamping:      2.5,
+    wavelengthBase:   16,
+  };
+
+  let instance = null;
+
+  function attach() {
+    if (instance) instance.destroy();
+    instance = Squiggle.squiggleUnderline('.sq', { ...opts });
+  }
+
+  attach();
+
+  // Wire up sliders
+  const sliders = [
+    { id: 'r-amplitude', label: 'v-amplitude', key: 'amplitudeEm',      fmt: v => v.toFixed(2) },
+    { id: 'r-frequency', label: 'v-frequency', key: 'frequency',         fmt: v => v },
+    { id: 'r-speed',     label: 'v-speed',     key: 'propagationSpeed',  fmt: v => v },
+    { id: 'r-spatial',   label: 'v-spatial',   key: 'spatialDamping',    fmt: v => v.toFixed(3) },
+    { id: 'r-time',      label: 'v-time',      key: 'timeDamping',       fmt: v => v.toFixed(1) },
+    { id: 'r-wl',        label: 'v-wl',        key: 'wavelengthBase',    fmt: v => v },
+  ];
+
+  sliders.forEach(({ id, label, key, fmt }) => {
+    const input = document.getElementById(id);
+    const display = document.getElementById(label);
+    input.addEventListener('input', () => {
+      const val = parseFloat(input.value);
+      opts[key] = val;
+      display.textContent = fmt(val);
+      attach();
+    });
+  });
+</script>
+</body>
+</html>
