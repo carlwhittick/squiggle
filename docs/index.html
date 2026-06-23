@@ -442,9 +442,9 @@ instance.<span class="tok-fn">destroy</span>();</pre>
   </div>
 </footer>
 
-<!-- Load from unpkg (UMD build, global = Squiggle) -->
-<script src="https://cdn.jsdelivr.net/npm/@carlwhittick/squiggle@1.0.0/dist/squiggle.umd.cjs"></script>
-<script>
+<script type="module">
+  import { squiggleUnderline } from 'https://cdn.jsdelivr.net/npm/@carlwhittick/squiggle@1.0.0/dist/squiggle.js';
+
   // Options kept in one object; re-applied on every slider change
   const opts = {
     amplitudeEm:      0.2,
@@ -459,7 +459,7 @@ instance.<span class="tok-fn">destroy</span>();</pre>
 
   function attach() {
     if (instance) instance.destroy();
-    instance = Squiggle.squiggleUnderline('.sq', { ...opts });
+    instance = squiggleUnderline('.sq', { ...opts });
   }
 
   attach();
