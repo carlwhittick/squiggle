@@ -70,15 +70,15 @@ function renderTextOffscreen(el: HTMLElement, width: number, height: number): Ui
 
 function buildLineMask(pixels: Uint8ClampedArray, lineY: number, gap: number, width: number, canvasH: number): boolean[] {
   const bandTop = Math.max(0, Math.floor(lineY - gap));
-  const bandH = Math.min(canvasH - bandTop, Math.ceil(lineY - bandTop) + 1);
+  const bandH = Math.min(canvasH - bandTop, Math.ceil(lineY - bandTop + gap) + 1);
   const mask = new Array<boolean>(width + 1).fill(false);
   if (bandH <= 0) return mask;
 
   for (let y = 0; y < bandH; y++) {
     for (let x = 0; x < width; x++) {
       if (pixels[((bandTop + y) * width + x) * 4 + 3] > 15) {
-        const lo = Math.max(0, x - gap);
-        const hi = Math.min(width, x + gap);
+        const lo = Math.max(0, Math.floor(x - gap));
+        const hi = Math.min(width, Math.ceil(x + gap));
         for (let i = lo; i <= hi; i++) mask[i] = true;
       }
     }
