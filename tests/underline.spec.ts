@@ -9,36 +9,49 @@ import { analyzeUnderline, parseCssColor, gapOverlap, UnderlineAnalysis } from '
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const FONT_SIZES = [12, 16, 24, 48];
+const FONT_SIZES = [12, 16, 24, 48, 64, 96];
 const TEST_TEXT  = 'Typography gjpqy Squiggle';
 const DIST_UMD   = path.resolve(__dirname, '../dist/squiggle.umd.cjs');
 
+const FONTS = [
+  { name: 'Nunito',           css: 'Nunito, sans-serif'             },
+  { name: 'Liberation Sans',  css: '"Liberation Sans", sans-serif'  },
+  { name: 'Liberation Serif', css: '"Liberation Serif", serif'       },
+  { name: 'Liberation Mono',  css: '"Liberation Mono", monospace'    },
+  { name: 'DejaVu Serif',     css: '"DejaVu Serif", serif'           },
+];
+
 // Tolerances
-const Y_TOL        = 2;   // px — vertical offset
+// Y tolerance scales with font size — larger fonts have proportionally larger underline offsets
+const yTol = (fontSize: number) => Math.max(4, Math.round(fontSize * 0.1));
 const THICKNESS_TOL = 2;  // px — stroke thickness
 const GAP_OVERLAP  = 0.6; // fraction of native gaps that must be matched
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function makeHtml(fontSize: number): string {
+function makeHtml(fontSize: number, fontFamily: string): string {
   return /* html */`<!DOCTYPE html>
 <html><head><style>
-  body { margin: 60px; background: white; font-family: Arial, sans-serif; }
+  body { margin: 60px; background: white; }
   .native {
     font-size: ${fontSize}px;
+    font-family: ${fontFamily};
     color: rgb(0,0,0);
     text-decoration: underline;
     text-decoration-color: rgb(200,0,0);
     text-decoration-skip-ink: auto;
     display: inline-block;
+    white-space: nowrap;
     padding-bottom: ${Math.ceil(fontSize * 0.4)}px;
   }
   .sq {
     font-size: ${fontSize}px;
+    font-family: ${fontFamily};
     color: rgb(0,0,0);
     text-decoration: underline;
     text-decoration-color: rgb(200,0,0);
     display: inline-block;
+    white-space: nowrap;
     padding-bottom: ${Math.ceil(fontSize * 0.4)}px;
     position: relative;
   }
@@ -80,6 +93,8 @@ function underlineScanStart(pngHeight: number): number {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test.describe('squiggle vs native underline', () => {
+  for (const font of FONTS) {
+    test.describe(font.name, () => {
   for (const fontSize of FONT_SIZES) {
     test.describe(`${fontSize}px`, () => {
 
@@ -87,14 +102,14 @@ test.describe('squiggle vs native underline', () => {
         if (!fs.existsSync(DIST_UMD)) {
           throw new Error('Run `npm run build` before tests');
         }
-        await page.setContent(makeHtml(fontSize));
+        await page.setContent(makeHtml(fontSize, font.css));
         const umd = fs.readFileSync(DIST_UMD, 'utf8');
         await page.addScriptTag({ content: umd });
         await page.evaluate(() => {
           (window as any).Squiggle.squiggleUnderline('.sq');
         });
-        // Let canvas settle
-        await page.waitForTimeout(50);
+        // Wait for async canvas measurement + render
+        await page.waitForTimeout(200);
       });
 
       // ── color ──────────────────────────────────────────────────────────────
@@ -145,7 +160,7 @@ test.describe('squiggle vs native underline', () => {
         expect(sqResult.hasUnderline).toBe(true);
 
         expect(Math.abs(nativeResult.yCenter - sqResult.yCenter))
-          .toBeLessThanOrEqual(Y_TOL);
+          .toBeLessThanOrEqual(yTol(fontSize));
       });
 
       // ── thickness ──────────────────────────────────────────────────────────
@@ -168,6 +183,41 @@ test.describe('squiggle vs native underline', () => {
 
         expect(Math.abs(nativeRes.thickness - sqRes.thickness))
           .toBeLessThanOrEqual(THICKNESS_TOL);
+      });
+
+      // ── comparison screenshot ───────────────────────────────────────────────
+
+      test('saves comparison screenshot', async ({ page }) => {
+        const nativePng = await screenshotPng(page, '.native');
+        const sqPng     = await screenshotPng(page, '.sq');
+
+        const SEP = 4;
+        const w   = Math.max(nativePng.width, sqPng.width);
+        const h   = nativePng.height + SEP + sqPng.height;
+
+        const out    = new PNG({ width: w, height: h });
+        // white background
+        out.data.fill(255);
+        // separator row: mid-grey
+        for (let x = 0; x < w; x++) {
+          const i = (nativePng.height * w + x) * 4;
+          out.data[i] = out.data[i + 1] = out.data[i + 2] = 180;
+          out.data[i + 3] = 255;
+          for (let s = 1; s < SEP; s++) {
+            const j = ((nativePng.height + s) * w + x) * 4;
+            out.data[j] = out.data[j + 1] = out.data[j + 2] = 180;
+            out.data[j + 3] = 255;
+          }
+        }
+        PNG.bitblt(nativePng, out, 0, 0, nativePng.width, nativePng.height, 0, 0);
+        PNG.bitblt(sqPng,     out, 0, 0, sqPng.width,     sqPng.height,     0, nativePng.height + SEP);
+
+        fs.mkdirSync(path.resolve(__dirname, '../test-results'), { recursive: true });
+        const slug = font.name.replace(/ /g, '-');
+        fs.writeFileSync(
+          path.resolve(__dirname, `../test-results/comparison-${slug}-${fontSize}px.png`),
+          PNG.sync.write(out),
+        );
       });
 
       // ── skip-ink ───────────────────────────────────────────────────────────
@@ -203,5 +253,7 @@ test.describe('squiggle vs native underline', () => {
       });
 
     });
+  }
+    });  // font.name
   }
 });

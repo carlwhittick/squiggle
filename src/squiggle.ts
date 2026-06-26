@@ -6,13 +6,16 @@ export type SquiggleOptions = {
   propagationSpeed?: number;
   spatialDamping?: number;
   timeDamping?: number;
+  /** Fallback stroke thickness (em) — used only when canvas measurement fails */
   thicknessEm?: number;
+  /** Fallback underline offset from line mid-point (em) — used only when canvas measurement fails */
   offsetYEm?: number;
   skipInkGapEm?: number;
 };
 
 type Ripple = { originX: number; startTime: number };
-type DecorationStyle = { color: string; thickness: number; offsetY: number };
+type DecorationStyle = { color: string; thickness: number };
+type LineBox = { x: number; width: number; lineTop: number; lineH: number };
 type UnderlineLine = { x: number; y: number; width: number; mask: boolean[] };
 
 export type SquiggleInstance = { destroy: () => void };
@@ -21,7 +24,7 @@ const TWO_PI = Math.PI * 2;
 const AUTO = 'auto';
 const FROM_FONT = 'from-font';
 
-function readDecoration(el: HTMLElement, fallbackThickness: number, fallbackOffsetY: number): DecorationStyle {
+function readDecoration(el: HTMLElement, fallbackThickness: number): DecorationStyle {
   const cs = getComputedStyle(el);
   const rawColor = cs.textDecorationColor;
   const color = rawColor && rawColor !== 'rgba(0, 0, 0, 0)' ? rawColor : cs.color;
@@ -30,9 +33,108 @@ function readDecoration(el: HTMLElement, fallbackThickness: number, fallbackOffs
     rawThickness && rawThickness !== AUTO && rawThickness !== FROM_FONT
       ? parseFloat(rawThickness) || fallbackThickness
       : fallbackThickness;
-  const rawOffset = cs.textUnderlineOffset;
-  const offsetY = rawOffset && rawOffset !== AUTO ? parseFloat(rawOffset) || fallbackOffsetY : fallbackOffsetY;
-  return { color, thickness, offsetY };
+  return { color, thickness };
+}
+
+/** Collect text line bounding boxes from the element. */
+function getLineBoxes(el: HTMLElement): LineBox[] {
+  const elRect = el.getBoundingClientRect();
+  const lineMap = new Map<number, { x: number; right: number; lineTop: number; lineH: number }>();
+  const range = document.createRange();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (!(node as Text).textContent?.trim()) continue;
+    range.selectNodeContents(node);
+    for (const rect of range.getClientRects()) {
+      if (rect.width < 1) continue;
+      const key = Math.round(rect.top - elRect.top);
+      const x = rect.left - elRect.left;
+      const right = rect.right - elRect.left;
+      if (lineMap.has(key)) {
+        const l = lineMap.get(key)!;
+        l.x = Math.min(l.x, x);
+        l.right = Math.max(l.right, right);
+      } else {
+        lineMap.set(key, { x, right, lineTop: rect.top - elRect.top, lineH: rect.height });
+      }
+    }
+  }
+  range.detach();
+  return Array.from(lineMap.values())
+    .sort((a, b) => a.lineTop - b.lineTop)
+    .map(({ x, right, lineTop, lineH }) => ({ x, width: right - x, lineTop, lineH }));
+}
+
+/**
+ * Measure the native underline position and thickness for the element's current
+ * font by rendering the text with a magenta underline via SVG foreignObject onto
+ * an offscreen canvas and pixel-scanning the result.
+ *
+ * Returns { yCenter, thickness } in pixels relative to the top of the line box,
+ * or null if the SVG render fails.
+ */
+async function measureNativeUnderline(
+  el: HTMLElement,
+  lineH: number,
+): Promise<{ yCenter: number; thickness: number } | null> {
+  const cs = getComputedStyle(el);
+  const text = el.textContent?.trim() || 'gjpqy';
+  const w = 600;
+  const h = Math.ceil(lineH) + 10;
+
+  const oc = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(w, h)
+    : (() => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; })();
+  const ctx = (oc as HTMLCanvasElement).getContext('2d') as CanvasRenderingContext2D;
+  if (!ctx) return null;
+
+  const html =
+    `<div xmlns="http://www.w3.org/1999/xhtml" style="` +
+    `font:${cs.font};` +
+    `color:transparent;` +
+    `text-decoration:underline;` +
+    `text-decoration-color:rgb(255,0,128);` +
+    `text-decoration-skip-ink:none;` +
+    `white-space:nowrap;` +
+    `line-height:${lineH}px;` +
+    `height:${lineH}px;` +
+    `overflow:visible;` +
+    `margin:0;padding:0` +
+    `">${text}</div>`;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+    `<foreignObject x="0" y="0" width="${w}" height="${h}">${html}</foreignObject>` +
+    `</svg>`;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0); resolve(); };
+      img.onerror = () => reject(new Error('SVG render failed'));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+  } catch {
+    return null;
+  }
+
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const rows: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      // Magenta: high R, low G, mid-high B, opaque
+      if (data[i + 3] > 50 && data[i] > 180 && data[i + 1] < 80 && data[i + 2] > 80) {
+        rows.push(y);
+        break;
+      }
+    }
+  }
+  if (rows.length === 0) return null;
+
+  const minY = Math.min(...rows);
+  const maxY = Math.max(...rows);
+  return { yCenter: (minY + maxY) / 2, thickness: maxY - minY + 1 };
 }
 
 function renderTextOffscreen(el: HTMLElement, width: number, height: number): Uint8ClampedArray | null {
@@ -86,48 +188,13 @@ function buildLineMask(pixels: Uint8ClampedArray, lineY: number, gap: number, wi
   return mask;
 }
 
-function getUnderlineLines(
-  el: HTMLElement,
-  offsetY: number,
-  fontSize: number,
-): Array<{ x: number; y: number; width: number }> {
-  const elRect = el.getBoundingClientRect();
-  const range = document.createRange();
-  const lineMap = new Map<number, { x: number; right: number; lineTop: number; lineH: number }>();
-
-  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (!(node as Text).textContent?.trim()) continue;
-    range.selectNodeContents(node);
-    for (const rect of range.getClientRects()) {
-      if (rect.width < 1) continue;
-      const key = Math.round(rect.top - elRect.top);
-      const x = rect.left - elRect.left;
-      const right = rect.right - elRect.left;
-      if (lineMap.has(key)) {
-        const l = lineMap.get(key)!;
-        l.x = Math.min(l.x, x);
-        l.right = Math.max(l.right, right);
-      } else {
-        lineMap.set(key, { x, right, lineTop: rect.top - elRect.top, lineH: rect.height });
-      }
-    }
-  }
-  range.detach();
-
-  return Array.from(lineMap.values())
-    .sort((a, b) => a.lineTop - b.lineTop)
-    .map(({ x, right, lineTop, lineH }) => ({
-      x,
-      width: right - x,
-      y: lineTop + (lineH + fontSize) / 2 + offsetY,
-    }));
-}
-
 /**
  * Attach animated canvas squiggle underlines to elements matching `selector`.
  * Underlines ripple outward from click/hover origin and dampen over time.
+ *
+ * Underline position and thickness are measured from the browser's own font
+ * rendering via an offscreen canvas, and automatically update when the font
+ * changes (size, weight, family, etc.).
  *
  * @example
  * const instance = squiggleUnderline('a, .link');
@@ -166,23 +233,45 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
     let amplitude = 3;
     let k = TWO_PI / 24;
     let fallbackThickness = 1.5;
-    let fallbackOffsetY = 2;
     let capPad = 2;
     let lines: UnderlineLine[] = [];
+    let ready = false;
+    let resizeSeq = 0;
 
-    function resize() {
-      const fontSize = parseFloat(getComputedStyle(el).fontSize) || 16;
+    async function resize() {
+      const seq = ++resizeSeq;
+      ready = false;
+
+      const cs = getComputedStyle(el);
+      const fontSize = parseFloat(cs.fontSize) || 16;
       amplitude = amplitudeEm * fontSize;
       k = TWO_PI / (wavelengthBase + wavelengthEm * fontSize);
-      fallbackThickness = Math.max(1, thicknessEm * fontSize);
-      fallbackOffsetY = offsetYEm * fontSize;
       const skipInkGap = Math.max(2, skipInkGapEm * fontSize);
 
-      const rawLines = getUnderlineLines(el, fallbackOffsetY, fontSize);
+      const boxes = getLineBoxes(el);
 
-      const maxRight = rawLines.reduce((m, l) => Math.max(m, l.x + l.width), 0);
-      const maxY = rawLines.reduce((m, l) => Math.max(m, l.y), 0);
+      // Measure underline position and thickness from the browser's own rendering.
+      // Falls back to formula-based values if the SVG render is unavailable.
+      let underlineYInBox: number;
+      if (boxes.length > 0) {
+        const measured = await measureNativeUnderline(el, boxes[0].lineH);
+        if (seq !== resizeSeq) return; // superseded by a later resize
+        if (measured) {
+          underlineYInBox = measured.yCenter;
+          fallbackThickness = Math.max(1, measured.thickness);
+        } else {
+          underlineYInBox = (boxes[0].lineH + fontSize) / 2 + offsetYEm * fontSize;
+          fallbackThickness = Math.max(1, thicknessEm * fontSize);
+        }
+      } else {
+        underlineYInBox = fontSize * (0.6 + offsetYEm);
+        fallbackThickness = Math.max(1, thicknessEm * fontSize);
+      }
+
       capPad = Math.ceil(fallbackThickness / 2) + 1;
+
+      const maxRight = boxes.reduce((m, b) => Math.max(m, b.x + b.width), 0);
+      const maxY = boxes.reduce((m, b) => Math.max(m, b.lineTop + underlineYInBox), 0);
       const w = Math.ceil(maxRight) || el.getBoundingClientRect().width;
       const h = Math.ceil(maxY + amplitude + fallbackThickness + 2);
 
@@ -193,12 +282,17 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
       const elH = el.offsetHeight;
       const pixels = renderTextOffscreen(el, w, elH);
 
-      lines = rawLines.map(({ x, y, width }) => ({
-        x, y, width,
-        mask: pixels
-          ? buildLineMask(pixels, y - fallbackOffsetY, skipInkGap, w, elH)
-          : new Array<boolean>(w + 1).fill(false),
-      }));
+      lines = boxes.map(({ x, lineTop, width }) => {
+        const y = lineTop + underlineYInBox;
+        return {
+          x, width, y,
+          mask: pixels
+            ? buildLineMask(pixels, y, skipInkGap, w, elH)
+            : new Array<boolean>(w + 1).fill(false),
+        };
+      });
+
+      ready = true;
     }
 
     function getDisplacement(x: number, ripple: Ripple, now: number): number {
@@ -256,7 +350,7 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
 
     function render(getDy: (x: number) => number) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const deco = readDecoration(el, fallbackThickness, fallbackOffsetY);
+      const deco = readDecoration(el, fallbackThickness);
       ctx.beginPath();
       applyStroke(deco);
       const caps = drawLines(getDy);
@@ -278,11 +372,13 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
     function drawFlat() { render(() => 0); }
 
     function onMouseEnter(e: MouseEvent) {
+      if (!ready) return;
       ripples.push({ originX: e.clientX - el.getBoundingClientRect().left + capPad, startTime: performance.now() });
       if (rafId === null) rafId = requestAnimationFrame(draw);
     }
 
     function onActivate(e: MouseEvent | FocusEvent) {
+      if (!ready) return;
       const originX = e instanceof MouseEvent
         ? e.clientX - el.getBoundingClientRect().left + capPad
         : el.offsetWidth / 2 + capPad;
@@ -290,14 +386,18 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
       if (rafId === null) rafId = requestAnimationFrame(draw);
     }
 
-    resize();
-    drawFlat();
+    resize().then(drawFlat);
 
-    const onResize = () => { resize(); drawFlat(); };
+    const onResize = () => resize().then(drawFlat);
     const ro = new ResizeObserver(onResize);
     ro.observe(el);
     if (el.parentElement) ro.observe(el.parentElement);
     window.addEventListener('resize', onResize);
+
+    // Re-measure when inline style or class changes (catches font-size, font-weight, font-family etc.)
+    const mo = new MutationObserver(onResize);
+    mo.observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+
     el.addEventListener('mouseenter', onMouseEnter);
     el.addEventListener('click', onActivate);
     el.addEventListener('focus', onActivate);
@@ -305,6 +405,7 @@ export function squiggleUnderline(selector: string, options: SquiggleOptions = {
     cleanups.push(() => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       ro.disconnect();
+      mo.disconnect();
       window.removeEventListener('resize', onResize);
       el.removeEventListener('mouseenter', onMouseEnter);
       el.removeEventListener('click', onActivate);

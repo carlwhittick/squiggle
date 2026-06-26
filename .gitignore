@@ -3,3 +3,5 @@ dist/
 .devenv/
 devenv.lock
 .direnv/
+test-results/
+playwright-report/
